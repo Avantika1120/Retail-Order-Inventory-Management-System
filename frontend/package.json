@@ -2,7 +2,6 @@
   "name": "retail-ops-frontend",
   "private": true,
   "version": "1.0.0",
-  "type": "module",
   "scripts": {
     "dev": "vite 0.0.0.0",
     "build": "tsc -b && vite build",
