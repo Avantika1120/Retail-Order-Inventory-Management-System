@@ -17,6 +17,12 @@ class ProductCreate(BaseModel):
     reorder_level: int = Field(default=5, ge=0)
 
 
+class ProductUpdate(BaseModel):
+    name: str | None = None
+    category: str | None = None
+    price: Decimal | None = Field(default=None, gt=0)
+
+
 class ProductRead(ORMModel):
     id: int
     sku: str
@@ -28,6 +34,11 @@ class ProductRead(ORMModel):
 class CustomerCreate(BaseModel):
     name: str
     email: EmailStr
+
+
+class CustomerUpdate(BaseModel):
+    name: str | None = None
+    email: EmailStr | None = None
 
 
 class CustomerRead(ORMModel):
@@ -54,6 +65,10 @@ class OrderLineCreate(BaseModel):
 class OrderCreate(BaseModel):
     customer_id: int
     items: List[OrderLineCreate]
+
+
+class OrderStatusUpdate(BaseModel):
+    status: str = Field(pattern="^(created|processing|shipped|completed|cancelled)$")
 
 
 class OrderRead(BaseModel):
