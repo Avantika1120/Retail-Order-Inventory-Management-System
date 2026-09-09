@@ -5,5 +5,6 @@ psycopg[binary]==3.2.10
 pydantic-settings==2.10.1
 pymongo==4.14.1
 openai==1.109.1
+email-validator==2.3.0
 pytest==8.4.2
 httpx==0.28.1
