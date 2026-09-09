@@ -2,99 +2,141 @@
 
 **React + TypeScript · FastAPI · PostgreSQL · MongoDB · Docker · Kubernetes · GitHub Actions · ChatGPT Review Insights**
 
-A production-style full-stack retail platform for managing products, customers, orders, inventory, and customer reviews. The project connects naturally to my analytics portfolio: after analyzing retail sales and profitability, I built the operational system that creates and manages the underlying business data.
+A production-style full-stack retail operations platform for managing products, customers, inventory, orders, fulfillment, and customer reviews. The project extends my retail analytics work one layer closer to the source: after analyzing sales and profitability, I built the operational system that creates and manages that business data.
 
 ## What I built
 
-- React + TypeScript frontend with hand-written CSS
-- FastAPI backend organized into routers, services, models, repositories, and schemas
-- PostgreSQL for transactional entities: products, customers, inventory, orders, and order items
-- MongoDB for product reviews and audit/activity events
-- Transaction-safe order creation that validates stock and decrements inventory
-- Inventory restocking workflow
-- Product review creation and product-level review retrieval
-- **ChatGPT Review Insights** endpoint that summarizes customer reviews into themes, pros, concerns, and a short executive summary when `OPENAI_API_KEY` is configured
+- React + TypeScript operations dashboard with hand-written responsive CSS
+- FastAPI backend organized into API, schema, model, database, and service layers
+- PostgreSQL for transactional products, customers, inventory, orders, and order items
+- MongoDB for flexible product reviews and audit/activity events
+- Product and customer create/read/update/delete workflows with business-safe deletion rules
+- Transaction-safe order creation with row-level inventory locking and automatic stock deduction
+- Inventory restocking and low-stock visibility
+- Order fulfillment state transitions: `created → processing → shipped → completed`
+- **ChatGPT Review Insights** that summarizes real stored reviews into an executive summary, common positives, concerns, and recommended product actions
 - pytest backend tests
 - Jest + React Testing Library frontend tests
-- Dockerfiles and Docker Compose orchestration
-- Kubernetes manifests for API, frontend, Postgres, and MongoDB
-- GitHub Actions CI for backend tests, frontend tests/build, and Docker image builds
-- Architecture and database documentation
+- Dockerfiles + Docker Compose local orchestration
+- Kubernetes manifests for API, frontend, PostgreSQL, and MongoDB
+- GitHub Actions CI validating backend, frontend, and Docker builds
+- Reproducible demo seed script
+- Architecture and database design documentation
 
 ## Architecture
 
 ```text
-Browser
-  |
-  v
-React + TypeScript frontend
-  |
-  v
-FastAPI REST API
-  |--------------------------|
-  v                          v
-PostgreSQL                MongoDB
-Products                  Reviews
-Customers                 Audit events
-Inventory
-Orders + OrderItems
-  |
-  +--> optional OpenAI Responses API --> ChatGPT Review Insights
+                         ┌─────────────────────────┐
+                         │ React + TypeScript SPA  │
+                         │ Retail Operations UI    │
+                         └────────────┬────────────┘
+                                      │ REST/JSON
+                                      ▼
+                         ┌─────────────────────────┐
+                         │       FastAPI API       │
+                         │ Services + Validation   │
+                         └───────┬─────────┬───────┘
+                                 │         │
+                   transactions  │         │ documents
+                                 ▼         ▼
+                    ┌────────────────┐   ┌────────────────┐
+                    │   PostgreSQL   │   │    MongoDB     │
+                    │ products       │   │ reviews        │
+                    │ customers      │   │ audit_events   │
+                    │ inventory      │   └───────┬────────┘
+                    │ orders/items   │           │
+                    └────────────────┘           │ on demand
+                                                 ▼
+                                     ┌─────────────────────┐
+                                     │ OpenAI Responses API│
+                                     │ ChatGPT Review      │
+                                     │ Insights            │
+                                     └─────────────────────┘
 ```
 
-## Core entities
+## Core data model
 
-### PostgreSQL
+### PostgreSQL — transactional system of record
 - `products`
 - `customers`
 - `inventory`
 - `orders`
 - `order_items`
 
-### MongoDB
+### MongoDB — flexible document workloads
 - `reviews`
 - `audit_events`
 
-## Key business workflows
+## Key workflows
 
-### 1. Create an order
-1. Validate the customer.
-2. Validate each product.
-3. Lock/check available stock.
-4. Calculate line totals and order total.
-5. Persist `Order` and `OrderItem` records.
-6. Decrement inventory in the same transaction.
-7. Write an audit event to MongoDB.
+### Order creation and inventory protection
 
-### 2. Restock inventory
-Operations users can increase on-hand quantity through the inventory endpoint; the service records the change and emits an audit event.
+1. Validate the customer and requested products.
+2. Lock each relevant inventory row with `SELECT ... FOR UPDATE`.
+3. Reject an order if available stock is insufficient.
+4. Calculate line totals and the overall order total.
+5. Create the order and order-item records.
+6. Decrement inventory inside the same PostgreSQL transaction.
+7. Commit the transaction and record an audit event in MongoDB.
 
-### 3. Product reviews + ChatGPT summary
-Reviews are stored in MongoDB because they are document-shaped and can evolve independently from the transactional order schema. For a selected product, the API can aggregate review text and ask the OpenAI Responses API for a concise structured summary. The AI feature is optional; all CRUD and inventory/order functionality works without an API key.
+This demonstrates why order/inventory operations belong in a relational database: the related writes must remain consistent.
+
+### Inventory operations
+
+The dashboard highlights SKUs at or below their reorder level and exposes a restock action. Inventory changes are persisted in PostgreSQL and logged to MongoDB.
+
+### Order fulfillment
+
+Orders move through controlled states:
+
+```text
+created → processing → shipped → completed
+    └────────────→ cancelled
+processing ──────→ cancelled
+```
+
+Invalid state transitions are rejected by the service layer.
+
+### Product reviews + ChatGPT Review Insights
+
+Product reviews are stored in MongoDB. When a user requests AI insights, the backend retrieves the stored reviews and sends only those reviews to the OpenAI Responses API. The prompt explicitly instructs the model not to invent facts beyond the supplied feedback.
+
+The result contains:
+- executive summary
+- common positives
+- common concerns
+- recommended product actions
+
+`OPENAI_API_KEY` is optional. Products, customers, inventory, orders, fulfillment, and reviews all work without it.
 
 ## Repository structure
 
 ```text
 backend/
   app/
-    api/
-    core/
-    db/
-    models/
-    schemas/
-    services/
+    api/routes.py
+    core/config.py
+    db/postgres.py
+    db/mongo.py
+    models/models.py
+    schemas/schemas.py
+    services/retail_service.py
+    services/review_service.py
     main.py
-  tests/
+  tests/test_health.py
+  seed_demo.py
   requirements.txt
   Dockerfile
 
 frontend/
   src/
-    components/
-    pages/
-    services/
-    types/
+    App.tsx
+    App.test.tsx
+    styles.css
+    main.tsx
   package.json
+  tsconfig.json
+  vite.config.ts
   Dockerfile
 
 k8s/
@@ -110,17 +152,39 @@ docs/DATABASE.md
 .env.example
 ```
 
-## Run locally with Docker
+## Fastest demo: Docker Compose
 
 ```bash
 cp .env.example .env
-docker compose up --build
+docker compose up --build -d
 ```
 
-Then open:
+Then seed demo data:
+
+```bash
+cd backend
+python -m venv .venv
+source .venv/bin/activate  # Windows: .venv\Scripts\activate
+pip install -r requirements.txt
+PYTHONPATH=. python seed_demo.py
+```
+
+Open:
 - Frontend: `http://localhost:5173`
 - API: `http://localhost:8000`
-- Swagger: `http://localhost:8000/docs`
+- Interactive Swagger docs: `http://localhost:8000/docs`
+
+The seed script creates sample retail products, customers, inventory, an order, and product reviews so the dashboard can be demonstrated immediately.
+
+## Enable ChatGPT Review Insights
+
+Add an OpenAI API key to `.env`:
+
+```text
+OPENAI_API_KEY=your_key_here
+```
+
+Then restart the API container and use **Generate ChatGPT Review Insights** from the product-review panel.
 
 ## Local development
 
@@ -129,9 +193,9 @@ Then open:
 ```bash
 cd backend
 python -m venv .venv
-source .venv/bin/activate  # Windows: .venv\Scripts\activate
+source .venv/bin/activate
 pip install -r requirements.txt
-uvicorn app.main:app --reload
+PYTHONPATH=. uvicorn app.main:app --reload
 ```
 
 ### Frontend
@@ -145,37 +209,57 @@ npm run dev
 ## Testing
 
 ```bash
-cd backend && pytest
-cd frontend && npm test -- --runInBand
+cd backend
+PYTHONPATH=. pytest -q
+
+cd ../frontend
+npm test -- --runInBand
+npm run build
 ```
+
+## CI/CD
+
+The GitHub Actions workflow runs three independent jobs on pushes and pull requests:
+
+1. **Backend** — starts PostgreSQL + MongoDB service containers, installs Python dependencies, and runs pytest.
+2. **Frontend** — installs Node dependencies, runs Jest/React Testing Library, and performs a production TypeScript/Vite build.
+3. **Docker** — builds both the FastAPI and frontend container images.
 
 ## Kubernetes
 
-The `k8s/` folder contains manifests for local deployment with Minikube or Kind.
+The `k8s/` directory contains local-cluster manifests for Minikube or Kind:
 
 ```bash
 kubectl apply -f k8s/
+kubectl get pods,svc
 ```
 
-Use `kubectl get pods,svc` to verify the deployment. Screenshots can be added to `docs/screenshots/` after running the cluster locally.
+The image names in the manifests are intentionally deployment placeholders; build/tag the images for your local registry or container registry before applying them.
+
+## Documentation
+
+- [System Architecture](docs/ARCHITECTURE.md)
+- [Database Design](docs/DATABASE.md)
 
 ## JD skill mapping
 
 | Skill | Evidence in this project |
 |---|---|
-| React | TypeScript SPA and reusable components |
-| HTML/CSS/JS | JSX/TSX plus hand-written CSS |
-| Python | FastAPI backend and service layer |
-| OOP | service/repository/model separation |
-| SQL / relational DB | PostgreSQL transactional schema |
-| MongoDB / NoSQL | reviews and audit logs |
-| Automated testing | pytest + Jest/RTL |
-| Docker | frontend/backend images + Compose |
-| Kubernetes | deployment/service manifests |
-| CI/CD | GitHub Actions tests and image builds |
-| Git | repository-based development workflow |
-| AI integration | optional ChatGPT review-summary feature |
+| React | TypeScript operations SPA |
+| HTML/CSS/modern JS | TSX + hand-written responsive CSS |
+| Python | FastAPI backend and domain services |
+| OOP / software design | service, schema, ORM model, API and DB separation |
+| SQL / relational DB | PostgreSQL transactional data model |
+| MongoDB / NoSQL | reviews + audit events |
+| Automated testing | pytest + Jest + React Testing Library |
+| Docker | separate backend/frontend images + Compose |
+| Kubernetes | API/frontend/Postgres/Mongo manifests |
+| CI/CD | automated test/build/image pipeline in GitHub Actions |
+| Git | iterative repository development and CI-triggered commits |
+| AI integration | optional ChatGPT review-summary workflow |
 
 ## Portfolio story
 
-My earlier retail projects focused on analyzing store sales, forecasting demand, and evaluating profitability. This project moves one layer closer to the source: it demonstrates how I would design and build the software system responsible for products, customers, inventory movements, orders, and product feedback before that information reaches an analytics warehouse or dashboard.
+My earlier retail projects focused on sales forecasting, pricing, and profitability analysis. This project moves upstream and demonstrates how I would engineer the operational application responsible for generating that data: maintaining the product catalog, managing customers and stock, creating orders safely, tracking fulfillment, collecting customer feedback, and exposing review insights to product teams.
+
+The result is one project that demonstrates **frontend engineering, backend API design, OOP, relational and NoSQL databases, testing, containerization, orchestration, CI/CD, and practical AI integration** in a coherent retail use case.
