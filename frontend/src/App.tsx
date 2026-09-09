@@ -5,7 +5,7 @@ type Inventory = { product_id:number; quantity_on_hand:number; reorder_level:num
 type Order = { id:number; customer_id:number; status:string; total_amount:number }
 type Review = { id:string; product_id:number; customer_id?:number; rating:number; title:string; body:string }
 
-const API = import.meta.env.VITE_API_URL || 'http://localhost:8000'
+const API = (window as Window & { __RETAIL_API_URL__?: string }).__RETAIL_API_URL__ || 'http://localhost:8000'
 
 export default function App() {
   const [products, setProducts] = useState<Product[]>([])
