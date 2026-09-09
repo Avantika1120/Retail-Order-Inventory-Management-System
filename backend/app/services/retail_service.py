@@ -6,7 +6,13 @@ from sqlalchemy.orm import Session
 
 from app.db.mongo import mongo_db
 from app.models.models import Customer, Inventory, Order, OrderItem, Product
-from app.schemas.schemas import CustomerCreate, OrderCreate, ProductCreate
+from app.schemas.schemas import (
+    CustomerCreate,
+    CustomerUpdate,
+    OrderCreate,
+    ProductCreate,
+    ProductUpdate,
+)
 
 
 class RetailService:
@@ -37,6 +43,32 @@ class RetailService:
         self._audit("product.created", {"product_id": product.id, "sku": product.sku})
         return product
 
+    def update_product(self, product_id: int, payload: ProductUpdate) -> Product:
+        product = self.db.get(Product, product_id)
+        if not product:
+            raise HTTPException(status_code=404, detail="Product not found")
+        for field, value in payload.model_dump(exclude_unset=True).items():
+            if value is not None:
+                setattr(product, field, value)
+        self.db.commit()
+        self.db.refresh(product)
+        self._audit("product.updated", {"product_id": product_id})
+        return product
+
+    def delete_product(self, product_id: int) -> None:
+        product = self.db.get(Product, product_id)
+        if not product:
+            raise HTTPException(status_code=404, detail="Product not found")
+        ordered = self.db.scalar(select(OrderItem.id).where(OrderItem.product_id == product_id).limit(1))
+        if ordered:
+            raise HTTPException(status_code=409, detail="Cannot delete a product referenced by an order")
+        self.db.delete(product)
+        self.db.commit()
+        self._audit("product.deleted", {"product_id": product_id})
+
+    def list_customers(self) -> list[Customer]:
+        return list(self.db.scalars(select(Customer).order_by(Customer.id)))
+
     def create_customer(self, payload: CustomerCreate) -> Customer:
         existing = self.db.scalar(select(Customer).where(Customer.email == payload.email))
         if existing:
@@ -47,6 +79,37 @@ class RetailService:
         self.db.refresh(customer)
         self._audit("customer.created", {"customer_id": customer.id})
         return customer
+
+    def update_customer(self, customer_id: int, payload: CustomerUpdate) -> Customer:
+        customer = self.db.get(Customer, customer_id)
+        if not customer:
+            raise HTTPException(status_code=404, detail="Customer not found")
+        values = payload.model_dump(exclude_unset=True)
+        if values.get("email"):
+            duplicate = self.db.scalar(
+                select(Customer).where(Customer.email == str(values["email"]), Customer.id != customer_id)
+            )
+            if duplicate:
+                raise HTTPException(status_code=409, detail="Customer email already exists")
+            values["email"] = str(values["email"])
+        for field, value in values.items():
+            if value is not None:
+                setattr(customer, field, value)
+        self.db.commit()
+        self.db.refresh(customer)
+        self._audit("customer.updated", {"customer_id": customer_id})
+        return customer
+
+    def delete_customer(self, customer_id: int) -> None:
+        customer = self.db.get(Customer, customer_id)
+        if not customer:
+            raise HTTPException(status_code=404, detail="Customer not found")
+        ordered = self.db.scalar(select(Order.id).where(Order.customer_id == customer_id).limit(1))
+        if ordered:
+            raise HTTPException(status_code=409, detail="Cannot delete a customer with order history")
+        self.db.delete(customer)
+        self.db.commit()
+        self._audit("customer.deleted", {"customer_id": customer_id})
 
     def list_inventory(self) -> list[Inventory]:
         return list(self.db.scalars(select(Inventory).order_by(Inventory.product_id)))
@@ -112,6 +175,25 @@ class RetailService:
 
     def list_orders(self) -> list[Order]:
         return list(self.db.scalars(select(Order).order_by(Order.created_at.desc())))
+
+    def update_order_status(self, order_id: int, status: str) -> Order:
+        order = self.db.get(Order, order_id)
+        if not order:
+            raise HTTPException(status_code=404, detail="Order not found")
+        allowed = {
+            "created": {"processing", "cancelled"},
+            "processing": {"shipped", "cancelled"},
+            "shipped": {"completed"},
+            "completed": set(),
+            "cancelled": set(),
+        }
+        if status != order.status and status not in allowed.get(order.status, set()):
+            raise HTTPException(status_code=409, detail=f"Invalid status transition: {order.status} -> {status}")
+        order.status = status
+        self.db.commit()
+        self.db.refresh(order)
+        self._audit("order.status_updated", {"order_id": order_id, "status": status})
+        return order
 
     @staticmethod
     def _audit(event_type: str, payload: dict) -> None:
