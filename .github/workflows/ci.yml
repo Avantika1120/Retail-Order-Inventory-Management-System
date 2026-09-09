@@ -1,0 +1,68 @@
+name: Full Stack CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: retail
+          POSTGRES_USER: retail
+          POSTGRES_PASSWORD: retail
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U retail -d retail"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+      mongodb:
+        image: mongo:7
+        ports:
+          - 27017:27017
+    env:
+      DATABASE_URL: postgresql+psycopg://retail:retail@localhost:5432/retail
+      MONGODB_URL: mongodb://localhost:27017
+      MONGODB_DB: retail
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install backend dependencies
+        working-directory: backend
+        run: pip install -r requirements.txt
+      - name: Run backend tests
+        working-directory: backend
+        run: pytest -q
+
+  frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm install
+      - name: Run frontend tests
+        working-directory: frontend
+        run: npm test -- --runInBand
+      - name: Build frontend
+        working-directory: frontend
+        run: npm run build
+
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build API image
+        run: docker build -t retail-api-ci ./backend
+      - name: Build frontend image
+        run: docker build -t retail-frontend-ci ./frontend
