@@ -1,0 +1,40 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: retail-api
+spec:
+  selector:
+    app: retail-api
+  ports:
+    - port: 8000
+      targetPort: 8000
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: retail-api
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: retail-api
+  template:
+    metadata:
+      labels:
+        app: retail-api
+    spec:
+      containers:
+        - name: api
+          image: avantika1120/retail-order-inventory-api:latest
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: DATABASE_URL
+              value: postgresql+psycopg://retail:retail@postgres:5432/retail
+            - name: MONGODB_URL
+              value: mongodb://mongodb:27017
+            - name: MONGODB_DB
+              value: retail
+            - name: OPENAI_MODEL
+              value: gpt-5.6-luna
+          ports:
+            - containerPort: 8000
